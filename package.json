@@ -1,0 +1,31 @@
+{
+  "name": "lightningbowl-oauth",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx dev-server.ts",
+    "build": "tsc --noEmit",
+    "deploy": "vercel --prod",
+    "db:init": "node -e \"require('dotenv').config({path:'.env.local'});import('@neondatabase/serverless').then(m=>{const sql=m.neon(process.env.DATABASE_URL);sql(require('fs').readFileSync('sql/init.sql','utf8')).then(()=>console.log('Done')).catch(console.error)})\""
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.16.2",
+    "@neondatabase/serverless": "^0.10.4",
+    "dropbox": "^10.34.0",
+    "google-auth-library": "^9.14.1"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.10.2",
+    "@vercel/node": "^3.2.24",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2"
+  }
+}
