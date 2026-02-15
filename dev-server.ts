@@ -7,7 +7,6 @@ import cookieParser from 'cookie-parser';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Import all handlers
-import healthHandler from './api/health';
 import googleStartHandler from './api/google-drive/start';
 import googleCallbackHandler from './api/google-drive/callback';
 import googleAccessTokenHandler from './api/google-drive/access-token';
@@ -44,9 +43,6 @@ function wrapHandler(handler: (req: VercelRequest, res: VercelResponse) => Promi
     }
   };
 }
-
-// Health
-app.all('/health', wrapHandler(healthHandler));
 
 // Google Drive
 app.all('/google-drive/start', wrapHandler(googleStartHandler));
