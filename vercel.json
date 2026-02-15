@@ -3,8 +3,7 @@
   "rewrites": [
     { "source": "/google-drive/:path*", "destination": "/api/google-drive/:path*" },
     { "source": "/onedrive/:path*", "destination": "/api/onedrive/:path*" },
-    { "source": "/dropbox/:path*", "destination": "/api/dropbox/:path*" },
-    { "source": "/health", "destination": "/api/health" }
+    { "source": "/dropbox/:path*", "destination": "/api/dropbox/:path*" }
   ],
   "headers": [
     {
