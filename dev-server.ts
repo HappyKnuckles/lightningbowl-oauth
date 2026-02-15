@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local' });
+dotenv.config({ path: '.env.development.local' });
 dotenv.config(); // fallback to .env
 
 import express from 'express';
