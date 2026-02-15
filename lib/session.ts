@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const COOKIE_NAME = 'lb_session';
+const COOKIE_NAME = '__Host-lb_session';
 const MAX_AGE = 30 * 24 * 60 * 60; // 30 days
 
 /* ---------- signing helpers ---------- */

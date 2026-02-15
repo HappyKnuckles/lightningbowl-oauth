@@ -143,3 +143,20 @@ export async function deleteSession(
     WHERE session_id = ${sessionId} AND provider = ${provider}
   `;
 }
+
+/** 
+ * Migrate a session to a new session ID (for session rotation after login).
+ * This prevents session fixation attacks.
+ */
+export async function migrateSession(
+  oldSessionId: string,
+  newSessionId: string,
+  provider: string,
+): Promise<void> {
+  const db = sql();
+  await db`
+    UPDATE oauth_tokens 
+    SET session_id = ${newSessionId}, updated_at = NOW()
+    WHERE session_id = ${oldSessionId} AND provider = ${provider}
+  `;
+}

@@ -10,8 +10,7 @@
     "resolveJsonModule": true,
     "declaration": false,
     "outDir": "dist",
-    "baseUrl": ".",
-    "moduleResolution": "node"
+    "moduleResolution": "bundler"
   },
   "include": ["api/**/*.ts", "lib/**/*.ts"],
   "exclude": ["node_modules", "dist"]

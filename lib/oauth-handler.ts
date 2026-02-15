@@ -9,7 +9,15 @@ import {
   getSession,
   storeTokens,
   updateAccessToken,
+  migrateSession,
+  deleteSession,
 } from './db';
+import { validateEnv } from './env-validation';
+import { checkRateLimit, RateLimits } from './rate-limit';
+import { validateCallbackParams, validateRedirectUrl } from './input-validation';
+
+// Validate environment variables on cold start
+// validateEnv();
 
 /* ---------- types ---------- */
 
@@ -29,6 +37,8 @@ export interface ProviderConfig {
   refreshAccessToken(
     refreshToken: string,
   ): Promise<{ accessToken: string; refreshToken?: string; expiresAt: Date }>;
+  /** Revoke a token at the provider (optional — if absent, only local disconnect). */
+  revokeToken?: (token: string) => Promise<void>;
 }
 
 /* ---------- helpers ---------- */
@@ -63,13 +73,23 @@ export async function handleStart(
   if (setCorsHeaders(req, res)) return;
 
   try {
-    const redirect =
-      (req.query.redirect as string) || getAllowedOrigins()[0];
+    // Rate limit by IP to prevent abuse
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 'unknown';
+    const rateLimit = checkRateLimit(`start:${ip}`, RateLimits.oauthStart);
 
-    if (!isValidRedirect(redirect)) {
-      res.status(400).json({ error: 'Invalid redirect URL' });
+    if (!rateLimit.success) {
+      res.setHeader('Retry-After', Math.ceil((rateLimit.reset.getTime() - Date.now()) / 1000));
+      res.status(429).json({
+        error: 'Too many requests. Please try again later.',
+      });
       return;
     }
+
+    const allowedOrigins = getAllowedOrigins();
+    const redirect = validateRedirectUrl(
+      req.query.redirect as string,
+      allowedOrigins,
+    ) || allowedOrigins[0];
 
     // Re-use existing session or create a new one
     let sessionId = getSessionId(req);
@@ -97,8 +117,11 @@ export async function handleStart(
     const authUrl = await provider.getAuthUrl({ state, codeChallenge });
     res.redirect(302, authUrl);
   } catch (err) {
-    console.error(`[${provider.name}/start]`, err);
-    res.status(500).json({ error: 'Failed to start OAuth flow' });
+    console.error(`[${provider.name}/start]`, {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ error: 'Failed to start authentication' });
   }
 }
 
@@ -130,35 +153,49 @@ export async function handleCallback(
       const u = new URL(fallbackUrl);
       u.searchParams.set('provider', provider.name);
       u.searchParams.set('status', 'error');
-      u.searchParams.set('error', String(errDesc || oauthErr));
+      u.searchParams.set('message', 'Authentication failed');
       res.redirect(302, u.toString());
       return;
     }
 
-    /* ---- basic validation ---- */
-    if (!code || !state) {
-      res.status(400).json({ error: 'Missing code or state parameter' });
+    /* ---- validate callback params ---- */
+    const params = validateCallbackParams(req.query);
+    if (!params) {
+      res.status(400).json({ error: 'Invalid callback parameters' });
       return;
     }
+
+    /* ---- validate session ---- */
     if (!sessionId || !session) {
       res.status(401).json({ error: 'No valid session found' });
       return;
     }
-    if (session.state !== String(state)) {
-      res.status(403).json({ error: 'State mismatch — possible CSRF attack' });
+
+    /* ---- CSRF protection: verify state ---- */
+    if (session.state !== params.state) {
+      console.warn('State mismatch detected', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        provider: provider.name,
+      });
+      res.status(403).json({ error: 'Invalid request. Please try again.' });
       return;
     }
 
     /* ---- exchange code for tokens ---- */
     const tokens = await provider.exchangeCode({
-      code: String(code),
+      code: params.code,
       codeVerifier: session.pkce_verifier ?? undefined,
     });
 
-    /* ---- persist encrypted refresh token ---- */
-    await storeTokens(sessionId, provider.name, {
+    /* ---- SECURITY: Rotate session after successful auth ---- */
+    const newSessionId = crypto.randomUUID();
+    await migrateSession(sessionId, newSessionId, provider.name);
+    setSessionCookie(res, newSessionId);
+
+    /* ---- SECURITY: Encrypt BOTH refresh AND access tokens ---- */
+    await storeTokens(newSessionId, provider.name, {
       encryptedRefreshToken: encrypt(tokens.refreshToken),
-      accessToken: tokens.accessToken,
+      accessToken: encrypt(tokens.accessToken),
       accessTokenExpiresAt: tokens.expiresAt,
     });
 
@@ -168,8 +205,11 @@ export async function handleCallback(
     u.searchParams.set('status', 'success');
     res.redirect(302, u.toString());
   } catch (err) {
-    console.error(`[${provider.name}/callback]`, err);
-    res.status(500).json({ error: 'OAuth callback failed' });
+    console.error(`[${provider.name}/callback]`, {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ error: 'Authentication failed. Please try again.' });
   }
 }
 
@@ -191,6 +231,25 @@ export async function handleAccessToken(
       return;
     }
 
+    /* ---- SECURITY: Rate limit by session ---- */
+    const rateLimit = checkRateLimit(
+      `access-token:${sessionId}:${provider.name}`,
+      RateLimits.accessToken,
+    );
+
+    if (!rateLimit.success) {
+      res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
+      res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
+      res.setHeader('X-RateLimit-Reset', rateLimit.reset.toISOString());
+      res.setHeader('Retry-After', Math.ceil((rateLimit.reset.getTime() - Date.now()) / 1000));
+
+      res.status(429).json({
+        error: 'Too many requests',
+        retry_after: rateLimit.reset.toISOString(),
+      });
+      return;
+    }
+
     const session = await getSession(sessionId, provider.name);
     if (!session?.encrypted_refresh_token) {
       res.status(404).json({ error: `Not connected to ${provider.name}` });
@@ -201,8 +260,11 @@ export async function handleAccessToken(
     if (session.access_token && session.access_token_expires_at) {
       const exp = new Date(session.access_token_expires_at).getTime();
       if (exp - 5 * 60_000 > Date.now()) {
+        res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
+        res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
+
         res.json({
-          access_token: session.access_token,
+          access_token: decrypt(session.access_token),
           expires_at: session.access_token_expires_at,
           provider: provider.name,
         });
@@ -215,7 +277,7 @@ export async function handleAccessToken(
     const result = await provider.refreshAccessToken(refreshToken);
 
     const update: Parameters<typeof updateAccessToken>[2] = {
-      accessToken: result.accessToken,
+      accessToken: encrypt(result.accessToken),
       accessTokenExpiresAt: result.expiresAt,
     };
     // Some providers rotate refresh tokens
@@ -224,13 +286,69 @@ export async function handleAccessToken(
     }
     await updateAccessToken(sessionId, provider.name, update);
 
+    res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
+    res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
+
     res.json({
       access_token: result.accessToken,
       expires_at: result.expiresAt.toISOString(),
       provider: provider.name,
     });
   } catch (err) {
-    console.error(`[${provider.name}/access-token]`, err);
+    console.error(`[${provider.name}/access-token]`, {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
     res.status(500).json({ error: 'Failed to retrieve access token' });
+  }
+}
+
+/* =================================================================
+   /disconnect — revoke stored tokens for a provider
+   ================================================================= */
+
+export async function handleDisconnect(
+  req: VercelRequest,
+  res: VercelResponse,
+  provider: ProviderConfig,
+): Promise<void> {
+  if (setCorsHeaders(req, res)) return;
+
+  try {
+    const sessionId = getSessionId(req);
+    if (!sessionId) {
+      res.status(401).json({ error: 'No session' });
+      return;
+    }
+
+    // Revoke token at the provider before deleting locally
+    if (provider.revokeToken) {
+      const session = await getSession(sessionId, provider.name);
+      if (session?.encrypted_refresh_token) {
+        const refreshToken = decrypt(session.encrypted_refresh_token);
+        try {
+          await provider.revokeToken(refreshToken);
+        } catch (revokeErr) {
+          // Log but don't block — still delete the local session
+          console.warn(`[${provider.name}/disconnect] Token revocation at provider failed:`, {
+            error: revokeErr instanceof Error ? revokeErr.message : 'Unknown error',
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    await deleteSession(sessionId, provider.name);
+
+    res.json({
+      success: true,
+      message: `Disconnected from ${provider.name}`,
+    });
+  } catch (err) {
+    console.error(`[${provider.name}/disconnect]`, {
+      error: err instanceof Error ? err.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    });
+    res.status(500).json({ error: 'Failed to disconnect' });
   }
 }

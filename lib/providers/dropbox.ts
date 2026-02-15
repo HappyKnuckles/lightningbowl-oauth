@@ -85,4 +85,18 @@ export const dropboxProvider: ProviderConfig = {
       expiresAt: new Date(Date.now() + (data.expires_in ?? 14400) * 1000),
     };
   },
+
+  /* ---- revoke token ---- */
+  async revokeToken(token) {
+    const res = await fetch('https://api.dropboxapi.com/2/auth/token/revoke', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Dropbox token revocation failed (${res.status}): ${await res.text()}`);
+    }
+  },
 };

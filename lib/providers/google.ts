@@ -72,4 +72,19 @@ export const googleProvider: ProviderConfig = {
       expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000),
     };
   },
+
+  /* ---- revoke token ---- */
+  async revokeToken(token) {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      },
+    );
+
+    if (!res.ok) {
+      throw new Error(`Google token revocation failed (${res.status}): ${await res.text()}`);
+    }
+  },
 };

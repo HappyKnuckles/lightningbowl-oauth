@@ -52,16 +52,19 @@ app.all('/health', wrapHandler(healthHandler));
 app.all('/google-drive/start', wrapHandler(googleStartHandler));
 app.all('/google-drive/callback', wrapHandler(googleCallbackHandler));
 app.all('/google-drive/access-token', wrapHandler(googleAccessTokenHandler));
+app.all('/google-drive/disconnect', wrapHandler((req, res) => import('./api/google-drive/disconnect').then(mod => mod.default(req, res))));
 
 // OneDrive
 app.all('/onedrive/start', wrapHandler(onedriveStartHandler));
 app.all('/onedrive/callback', wrapHandler(onedriveCallbackHandler));
 app.all('/onedrive/access-token', wrapHandler(onedriveAccessTokenHandler));
+app.all('/onedrive/disconnect', wrapHandler((req, res) => import('./api/onedrive/disconnect').then(mod => mod.default(req, res))));
 
 // Dropbox
 app.all('/dropbox/start', wrapHandler(dropboxStartHandler));
 app.all('/dropbox/callback', wrapHandler(dropboxCallbackHandler));
 app.all('/dropbox/access-token', wrapHandler(dropboxAccessTokenHandler));
+app.all('/dropbox/disconnect', wrapHandler((req, res) => import('./api/dropbox/disconnect').then(mod => mod.default(req, res))));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
