@@ -25,7 +25,6 @@ export const dropboxProvider: ProviderConfig = {
   name: 'dropbox',
   usesPkce: false,
 
-  /* ---- auth URL (Dropbox SDK) ---- */
   async getAuthUrl({ state }) {
     const dbxAuth = auth();
     const url = await dbxAuth.getAuthenticationUrl(
@@ -37,7 +36,6 @@ export const dropboxProvider: ProviderConfig = {
     return url.toString();
   },
 
-  /* ---- code exchange (Dropbox SDK) ---- */
   async exchangeCode({ code }) {
     const dbxAuth = auth();
     const response = await dbxAuth.getAccessTokenFromCode(
@@ -57,7 +55,6 @@ export const dropboxProvider: ProviderConfig = {
     };
   },
 
-  /* ---- refresh (HTTP — avoids SDK state dependency) ---- */
   async refreshAccessToken(refreshToken) {
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
@@ -86,7 +83,6 @@ export const dropboxProvider: ProviderConfig = {
     };
   },
 
-  /* ---- revoke token ---- */
   async revokeToken(token) {
     const res = await fetch('https://api.dropboxapi.com/2/auth/token/revoke', {
       method: 'POST',

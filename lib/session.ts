@@ -4,7 +4,6 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const COOKIE_NAME = '__Host-lb_session';
 const MAX_AGE = 30 * 24 * 60 * 60; // 30 days
 
-/* ---------- signing helpers ---------- */
 
 function sign(value: string): string {
   const sig = crypto
@@ -29,8 +28,6 @@ function verify(signed: string): string | null {
   if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
   return value;
 }
-
-/* ---------- public API ---------- */
 
 /** Read and validate session ID from the request cookie. */
 export function getSessionId(req: VercelRequest): string | null {

@@ -12,14 +12,10 @@ import {
   migrateSession,
   deleteSession,
 } from './db';
-import { validateEnv } from './env-validation';
-import { checkRateLimit, RateLimits } from './rate-limit';
 import { validateCallbackParams, validateRedirectUrl } from './input-validation';
 
 // Validate environment variables on cold start
 // validateEnv();
-
-/* ---------- types ---------- */
 
 export interface ProviderConfig {
   /** URL-safe provider name used in DB + query params (e.g. "google-drive"). */
@@ -41,8 +37,6 @@ export interface ProviderConfig {
   revokeToken?: (token: string) => Promise<void>;
 }
 
-/* ---------- helpers ---------- */
-
 function getAllowedOrigins(): string[] {
   const env = process.env.ALLOWED_ORIGINS;
   if (env) return env.split(',').map(o => o.trim());
@@ -61,10 +55,6 @@ function isValidRedirect(url: string): boolean {
   }
 }
 
-/* =================================================================
-   /start — initiate OAuth flow
-   ================================================================= */
-
 export async function handleStart(
   req: VercelRequest,
   res: VercelResponse,
@@ -73,30 +63,17 @@ export async function handleStart(
   if (setCorsHeaders(req, res)) return;
 
   try {
-    // Rate limit by IP to prevent abuse
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0] || 'unknown';
-    const rateLimit = checkRateLimit(`start:${ip}`, RateLimits.oauthStart);
-
-    if (!rateLimit.success) {
-      res.setHeader('Retry-After', Math.ceil((rateLimit.reset.getTime() - Date.now()) / 1000));
-      res.status(429).json({
-        error: 'Too many requests. Please try again later.',
-      });
-      return;
-    }
-
     const allowedOrigins = getAllowedOrigins();
     const redirect = validateRedirectUrl(
       req.query.redirect as string,
       allowedOrigins,
     ) || allowedOrigins[0];
 
-    // Re-use existing session or create a new one
     let sessionId = getSessionId(req);
     if (!sessionId) {
       sessionId = createSession(res);
     } else {
-      setSessionCookie(res, sessionId); // refresh expiry
+      setSessionCookie(res, sessionId);
     }
 
     const state = crypto.randomBytes(32).toString('hex');
@@ -124,10 +101,6 @@ export async function handleStart(
     res.status(500).json({ error: 'Failed to start authentication' });
   }
 }
-
-/* =================================================================
-   /callback — handle the provider redirect
-   ================================================================= */
 
 export async function handleCallback(
   req: VercelRequest,
@@ -158,14 +131,12 @@ export async function handleCallback(
       return;
     }
 
-    /* ---- validate callback params ---- */
     const params = validateCallbackParams(req.query);
     if (!params) {
       res.status(400).json({ error: 'Invalid callback parameters' });
       return;
     }
 
-    /* ---- validate session ---- */
     if (!sessionId || !session) {
       res.status(401).json({ error: 'No valid session found' });
       return;
@@ -181,18 +152,17 @@ export async function handleCallback(
       return;
     }
 
-    /* ---- exchange code for tokens ---- */
     const tokens = await provider.exchangeCode({
       code: params.code,
       codeVerifier: session.pkce_verifier ?? undefined,
     });
 
-    /* ---- SECURITY: Rotate session after successful auth ---- */
+    /* ---- Rotate session after successful auth ---- */
     const newSessionId = crypto.randomUUID();
     await migrateSession(sessionId, newSessionId, provider.name);
     setSessionCookie(res, newSessionId);
 
-    /* ---- SECURITY: Encrypt BOTH refresh AND access tokens ---- */
+    /* ---- Encrypt refresh and access tokens ---- */
     await storeTokens(newSessionId, provider.name, {
       encryptedRefreshToken: encrypt(tokens.refreshToken),
       accessToken: encrypt(tokens.accessToken),
@@ -213,10 +183,6 @@ export async function handleCallback(
   }
 }
 
-/* =================================================================
-   /access-token — return a short-lived access token to frontend
-   ================================================================= */
-
 export async function handleAccessToken(
   req: VercelRequest,
   res: VercelResponse,
@@ -231,25 +197,6 @@ export async function handleAccessToken(
       return;
     }
 
-    /* ---- SECURITY: Rate limit by session ---- */
-    const rateLimit = checkRateLimit(
-      `access-token:${sessionId}:${provider.name}`,
-      RateLimits.accessToken,
-    );
-
-    if (!rateLimit.success) {
-      res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
-      res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
-      res.setHeader('X-RateLimit-Reset', rateLimit.reset.toISOString());
-      res.setHeader('Retry-After', Math.ceil((rateLimit.reset.getTime() - Date.now()) / 1000));
-
-      res.status(429).json({
-        error: 'Too many requests',
-        retry_after: rateLimit.reset.toISOString(),
-      });
-      return;
-    }
-
     const session = await getSession(sessionId, provider.name);
     if (!session?.encrypted_refresh_token) {
       res.status(404).json({ error: `Not connected to ${provider.name}` });
@@ -260,9 +207,6 @@ export async function handleAccessToken(
     if (session.access_token && session.access_token_expires_at) {
       const exp = new Date(session.access_token_expires_at).getTime();
       if (exp - 5 * 60_000 > Date.now()) {
-        res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
-        res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
-
         res.json({
           access_token: decrypt(session.access_token),
           expires_at: session.access_token_expires_at,
@@ -286,9 +230,6 @@ export async function handleAccessToken(
     }
     await updateAccessToken(sessionId, provider.name, update);
 
-    res.setHeader('X-RateLimit-Limit', String(rateLimit.limit));
-    res.setHeader('X-RateLimit-Remaining', String(rateLimit.remaining));
-
     res.json({
       access_token: result.accessToken,
       expires_at: result.expiresAt.toISOString(),
@@ -302,10 +243,6 @@ export async function handleAccessToken(
     res.status(500).json({ error: 'Failed to retrieve access token' });
   }
 }
-
-/* =================================================================
-   /disconnect — revoke stored tokens for a provider
-   ================================================================= */
 
 export async function handleDisconnect(
   req: VercelRequest,

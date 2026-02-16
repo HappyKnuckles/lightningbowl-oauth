@@ -20,7 +20,6 @@ export const googleProvider: ProviderConfig = {
   name: 'google-drive',
   usesPkce: true,
 
-  /* ---- auth URL (SDK) ---- */
   async getAuthUrl({ state, codeChallenge }) {
     return client().generateAuthUrl({
       access_type: 'offline',
@@ -28,11 +27,10 @@ export const googleProvider: ProviderConfig = {
       state,
       code_challenge: codeChallenge,
       code_challenge_method: CodeChallengeMethod.S256,
-      prompt: 'consent', // always get refresh token
+      prompt: 'consent',
     });
   },
 
-  /* ---- code exchange (SDK) ---- */
   async exchangeCode({ code, codeVerifier }) {
     const { tokens } = await client().getToken({ code, codeVerifier });
     if (!tokens.access_token || !tokens.refresh_token) {
@@ -45,7 +43,6 @@ export const googleProvider: ProviderConfig = {
     };
   },
 
-  /* ---- refresh (HTTP — avoids SDK state issues in serverless) ---- */
   async refreshAccessToken(refreshToken) {
     const res = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -73,7 +70,6 @@ export const googleProvider: ProviderConfig = {
     };
   },
 
-  /* ---- revoke token ---- */
   async revokeToken(token) {
     const res = await fetch(
       `https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`,

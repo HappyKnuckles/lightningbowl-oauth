@@ -57,12 +57,10 @@ export function validateRedirectUrl(
   try {
     const parsed = new URL(url);
 
-    // Must be HTTPS in production (or http://localhost for dev)
     if (parsed.protocol !== 'https:' && !url.startsWith('http://localhost')) {
       return null;
     }
 
-    // Must be in allowed list
     if (!allowedOrigins.includes(parsed.origin)) {
       return null;
     }

@@ -29,8 +29,6 @@ export async function ensureTable(): Promise<void> {
   initialized = true;
 }
 
-/* ---------- types ---------- */
-
 export interface OAuthSession {
   id: string;
   session_id: string;
@@ -42,8 +40,6 @@ export interface OAuthSession {
   access_token_expires_at: string | null;
   redirect_url: string | null;
 }
-
-/* ---------- queries ---------- */
 
 /** Insert or update a pending OAuth flow (state, PKCE, redirect). */
 export async function upsertPendingAuth(

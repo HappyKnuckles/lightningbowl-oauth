@@ -1,12 +1,11 @@
 import dotenv from 'dotenv';
 dotenv.config({ path: '.env.development.local' });
-dotenv.config(); // fallback to .env
+dotenv.config();
 
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Import all handlers
 import googleStartHandler from './api/google-drive/start';
 import googleCallbackHandler from './api/google-drive/callback';
 import googleAccessTokenHandler from './api/google-drive/access-token';

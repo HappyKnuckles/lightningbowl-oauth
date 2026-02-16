@@ -24,7 +24,6 @@ export const onedriveProvider: ProviderConfig = {
   name: 'onedrive',
   usesPkce: true,
 
-  /* ---- auth URL (MSAL SDK) ---- */
   async getAuthUrl({ state, codeChallenge }) {
     return msalApp().getAuthCodeUrl({
       scopes: SCOPES,
@@ -35,7 +34,6 @@ export const onedriveProvider: ProviderConfig = {
     });
   },
 
-  /* ---- code exchange (HTTP) ---- */
   async exchangeCode({ code, codeVerifier }) {
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
@@ -66,7 +64,6 @@ export const onedriveProvider: ProviderConfig = {
     };
   },
 
-  /* ---- refresh (HTTP) ---- */
   async refreshAccessToken(refreshToken) {
     const res = await fetch(TOKEN_URL, {
       method: 'POST',
