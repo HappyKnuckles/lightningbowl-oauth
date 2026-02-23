@@ -107,6 +107,16 @@ export async function handleCallback(
   res: VercelResponse,
   provider: ProviderConfig,
 ): Promise<void> {
+  /** Always redirect back to the frontend — never leave the user stranded
+   *  on the backend callback URL with a JSON error response. */
+  function redirectWithError(redirectUrl: string, message: string): void {
+    const u = new URL(redirectUrl);
+    u.searchParams.set('provider', provider.name);
+    u.searchParams.set('status', 'error');
+    u.searchParams.set('message', message);
+    res.redirect(302, u.toString());
+  }
+
   try {
     const {
       code,
@@ -123,22 +133,18 @@ export async function handleCallback(
 
     /* ---- provider returned an error ---- */
     if (oauthErr) {
-      const u = new URL(fallbackUrl);
-      u.searchParams.set('provider', provider.name);
-      u.searchParams.set('status', 'error');
-      u.searchParams.set('message', 'Authentication failed');
-      res.redirect(302, u.toString());
+      redirectWithError(fallbackUrl, 'Authentication failed');
       return;
     }
 
     const params = validateCallbackParams(req.query);
     if (!params) {
-      res.status(400).json({ error: 'Invalid callback parameters' });
+      redirectWithError(fallbackUrl, 'Invalid callback parameters');
       return;
     }
 
     if (!sessionId || !session) {
-      res.status(401).json({ error: 'No valid session found' });
+      redirectWithError(fallbackUrl, 'Session expired. Please try again.');
       return;
     }
 
@@ -148,7 +154,7 @@ export async function handleCallback(
         sessionId: sessionId.substring(0, 8) + '...',
         provider: provider.name,
       });
-      res.status(403).json({ error: 'Invalid request. Please try again.' });
+      redirectWithError(fallbackUrl, 'Invalid request. Please try again.');
       return;
     }
 
@@ -179,7 +185,9 @@ export async function handleCallback(
       error: err instanceof Error ? err.message : 'Unknown error',
       timestamp: new Date().toISOString(),
     });
-    res.status(500).json({ error: 'Authentication failed. Please try again.' });
+    // Still redirect on error — use first allowed origin as fallback
+    const fallbackUrl = getAllowedOrigins()[0];
+    redirectWithError(fallbackUrl, 'Authentication failed. Please try again.');
   }
 }
 
