@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { setCorsHeaders } from './cors';
+import { setCorsHeaders, getAllowedOrigins } from './cors';
 import { getSessionId, createSession, setSessionCookie } from './session';
 import { generateCodeVerifier, generateCodeChallenge } from './pkce';
 import { encrypt, decrypt } from './crypto';
@@ -35,16 +35,6 @@ export interface ProviderConfig {
   ): Promise<{ accessToken: string; refreshToken?: string; expiresAt: Date }>;
   /** Revoke a token at the provider (optional — if absent, only local disconnect). */
   revokeToken?: (token: string) => Promise<void>;
-}
-
-function getAllowedOrigins(): string[] {
-  const env = process.env.ALLOWED_ORIGINS;
-  if (env) return env.split(',').map(o => o.trim());
-  return [
-    'https://lightningbowl.de',
-    'https://test.lightningbowl.de',
-    'http://localhost:8100',
-  ];
 }
 
 function isValidRedirect(url: string): boolean {
