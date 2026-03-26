@@ -1,13 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-function getAllowedOrigins(): string[] {
+export function getAllowedOrigins(): string[] {
   const env = process.env.ALLOWED_ORIGINS;
-  if (env) return env.split(',').map(o => o.trim());
-  return [
-    'https://lightningbowl.de',
-    'https://test.lightningbowl.de',
-    'http://localhost:8100',
-  ];
+  if (env) return env.split(',').map(o => o.trim()).filter(Boolean);
+  return [];
 }
 
 /**
