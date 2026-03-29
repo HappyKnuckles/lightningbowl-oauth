@@ -6,15 +6,39 @@ export function getAllowedOrigins(): string[] {
   return [];
 }
 
+let _cachedPatterns: RegExp[] | null = null;
+
+export function getAllowedOriginPatterns(): RegExp[] {
+  if (_cachedPatterns !== null) return _cachedPatterns;
+  const env = process.env.ALLOWED_ORIGIN_PATTERNS;
+  if (!env) return (_cachedPatterns = []);
+  _cachedPatterns = env
+    .split(',')
+    .map(p => p.trim())
+    .filter(Boolean)
+    .flatMap(p => {
+      try {
+        return [new RegExp(p)];
+      } catch {
+        return [];
+      }
+    });
+  return _cachedPatterns;
+}
+
+export function isOriginAllowed(origin: string): boolean {
+  if (getAllowedOrigins().includes(origin)) return true;
+  return getAllowedOriginPatterns().some(pattern => pattern.test(origin));
+}
+
 /**
  * Sets CORS headers and handles OPTIONS preflight.
  * Returns true if the request was a preflight (caller should return early).
  */
 export function setCorsHeaders(req: VercelRequest, res: VercelResponse): boolean {
   const origin = req.headers.origin;
-  const allowed = getAllowedOrigins();
 
-  if (origin && allowed.includes(origin)) {
+  if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
