@@ -6,29 +6,25 @@ export function getAllowedOrigins(): string[] {
   return [];
 }
 
-let _cachedPatterns: RegExp[] | null = null;
+let _cachedOriginMatchers: RegExp[] | null = null;
 
-export function getAllowedOriginPatterns(): RegExp[] {
-  if (_cachedPatterns !== null) return _cachedPatterns;
-  const env = process.env.ALLOWED_ORIGIN_PATTERNS;
-  if (!env) return (_cachedPatterns = []);
-  _cachedPatterns = env
-    .split(',')
-    .map(p => p.trim())
-    .filter(Boolean)
-    .flatMap(p => {
+export function getAllowedOriginMatchers(): RegExp[] {
+  if (_cachedOriginMatchers !== null) return _cachedOriginMatchers;
+  _cachedOriginMatchers = getAllowedOrigins().flatMap(origin => {
+    if (origin.startsWith('^')) {
       try {
-        return [new RegExp(p)];
+        return [new RegExp(origin)];
       } catch {
         return [];
       }
-    });
-  return _cachedPatterns;
+    }
+    return [new RegExp(`^${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)];
+  });
+  return _cachedOriginMatchers;
 }
 
 export function isOriginAllowed(origin: string): boolean {
-  if (getAllowedOrigins().includes(origin)) return true;
-  return getAllowedOriginPatterns().some(pattern => pattern.test(origin));
+  return getAllowedOriginMatchers().some(pattern => pattern.test(origin));
 }
 
 /**
