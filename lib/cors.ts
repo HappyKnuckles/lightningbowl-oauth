@@ -1,9 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+const VERCEL_PREVIEW_ORIGIN_PATTERN =
+  /^https:\/\/lightningbowl-[a-z0-9]+(?:-[a-z0-9]+)*-nicos-projects-1c3811a7\.vercel\.app$/;
+
 export function getAllowedOrigins(): string[] {
   const env = process.env.ALLOWED_ORIGINS;
   if (env) return env.split(',').map(o => o.trim()).filter(Boolean);
   return [];
+}
+
+export function isOriginAllowed(origin: string): boolean {
+  if (getAllowedOrigins().includes(origin)) return true;
+  return VERCEL_PREVIEW_ORIGIN_PATTERN.test(origin);
 }
 
 /**
@@ -12,9 +20,8 @@ export function getAllowedOrigins(): string[] {
  */
 export function setCorsHeaders(req: VercelRequest, res: VercelResponse): boolean {
   const origin = req.headers.origin;
-  const allowed = getAllowedOrigins();
 
-  if (origin && allowed.includes(origin)) {
+  if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
