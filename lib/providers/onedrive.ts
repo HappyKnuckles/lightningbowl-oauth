@@ -1,5 +1,6 @@
 import { ConfidentialClientApplication } from '@azure/msal-node';
 import type { ProviderConfig } from '../oauth-handler';
+import { RefreshTokenInvalidError, isInvalidGrantResponse } from '../errors';
 
 const SCOPES = ['Files.ReadWrite', 'offline_access'];
 const TOKEN_URL =
@@ -78,7 +79,11 @@ export const onedriveProvider: ProviderConfig = {
     });
 
     if (!res.ok) {
-      throw new Error(`OneDrive refresh failed: ${await res.text()}`);
+      const body = await res.text();
+      if (isInvalidGrantResponse(res.status, body)) {
+        throw new RefreshTokenInvalidError('onedrive');
+      }
+      throw new Error(`OneDrive refresh failed (${res.status})`);
     }
 
     const data: any = await res.json();

@@ -1,5 +1,6 @@
 import { DropboxAuth } from 'dropbox';
 import type { ProviderConfig } from '../oauth-handler';
+import { RefreshTokenInvalidError, isInvalidGrantResponse } from '../errors';
 
 const TOKEN_URL = 'https://api.dropboxapi.com/oauth2/token';
 
@@ -69,7 +70,11 @@ export const dropboxProvider: ProviderConfig = {
     });
 
     if (!res.ok) {
-      throw new Error(`Dropbox refresh failed: ${await res.text()}`);
+      const body = await res.text();
+      if (isInvalidGrantResponse(res.status, body)) {
+        throw new RefreshTokenInvalidError('dropbox');
+      }
+      throw new Error(`Dropbox refresh failed (${res.status})`);
     }
 
     const data: any = await res.json();
@@ -83,16 +88,28 @@ export const dropboxProvider: ProviderConfig = {
     };
   },
 
-  async revokeToken(token) {
+  async revokeToken(refreshToken) {
+    // /2/auth/token/revoke only accepts an *access* token; revoking it also
+    // revokes the paired refresh token. Exchange first, then revoke.
+    let accessToken: string;
+    try {
+      const result = await this.refreshAccessToken(refreshToken);
+      accessToken = result.accessToken;
+    } catch (err) {
+      // Already revoked/expired at Dropbox — nothing left to revoke.
+      if (err instanceof RefreshTokenInvalidError) return;
+      throw err;
+    }
+
     const res = await fetch('https://api.dropboxapi.com/2/auth/token/revoke', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
       },
     });
 
     if (!res.ok) {
-      throw new Error(`Dropbox token revocation failed (${res.status}): ${await res.text()}`);
+      throw new Error(`Dropbox token revocation failed (${res.status})`);
     }
   },
 };

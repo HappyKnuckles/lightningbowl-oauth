@@ -140,19 +140,40 @@ export async function deleteSession(
   `;
 }
 
-/** 
+/**
  * Migrate a session to a new session ID (for session rotation after login).
  * This prevents session fixation attacks.
+ *
+ * Moves ALL provider rows of the old session, not just the provider that
+ * triggered the rotation: the browser only holds one session cookie, so any
+ * row left under the old ID would become permanently unreachable and the
+ * user would lose that provider connection.
  */
 export async function migrateSession(
   oldSessionId: string,
   newSessionId: string,
-  provider: string,
 ): Promise<void> {
   const db = sql();
   await db`
-    UPDATE oauth_tokens 
+    UPDATE oauth_tokens
     SET session_id = ${newSessionId}, updated_at = NOW()
-    WHERE session_id = ${oldSessionId} AND provider = ${provider}
+    WHERE session_id = ${oldSessionId}
+  `;
+}
+
+/**
+ * Remove rows that can never be used again:
+ * - connected sessions idle longer than the sliding cookie lifetime
+ *   (the browser has dropped the cookie, so the row is unreachable), and
+ * - abandoned auth flows (state stored, tokens never exchanged).
+ * Keeps orphaned encrypted refresh tokens from accumulating indefinitely.
+ */
+export async function deleteStaleSessions(): Promise<void> {
+  await ensureTable();
+  const db = sql();
+  await db`
+    DELETE FROM oauth_tokens
+    WHERE (updated_at < NOW() - INTERVAL '180 days')
+       OR (encrypted_refresh_token IS NULL AND updated_at < NOW() - INTERVAL '1 day')
   `;
 }
