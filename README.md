@@ -8,7 +8,11 @@ Used for Lightningbowl automatic file sync.
 - PKCE + state parameter CSRF protection
 - Session rotation on successful auth
 - Token encryption at rest
-- Automatic token refresh
+- Automatic token refresh with retry; expired/revoked grants answer 401 with
+  `code: "reauthentication_required"` so clients know when to re-run OAuth
+- Sliding session: the cookie is renewed on every `access-token` call, so
+  users only need to reauthenticate after 90 days of inactivity (or when the
+  provider revokes the refresh token)
 
 ## Setup
 
@@ -21,7 +25,7 @@ npm install
 ```env
 DATABASE_URL=postgres://...
 ENCRYPTION_KEY=32-byte-hex-key
-COOKIE_SECRET=32-byte-hex-key
+SESSION_SECRET=32-byte-hex-key
 ALLOWED_ORIGINS=https://yourapp.com
 
 DROPBOX_CLIENT_ID=...

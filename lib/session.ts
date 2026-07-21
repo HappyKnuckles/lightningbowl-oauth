@@ -2,7 +2,10 @@ import crypto from 'crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const COOKIE_NAME = '__Host-lb_session';
-const MAX_AGE = 30 * 24 * 60 * 60; // 30 days
+// Sliding window: the cookie is re-issued on every authenticated request
+// (see handleAccessToken), so this is the maximum period of *inactivity*
+// before reauthentication is needed — not a hard cap on the session.
+const MAX_AGE = 90 * 24 * 60 * 60; // 90 days
 
 
 function sign(value: string): string {

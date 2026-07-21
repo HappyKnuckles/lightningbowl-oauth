@@ -11,11 +11,15 @@ import {
   updateAccessToken,
   migrateSession,
   deleteSession,
+  deleteStaleSessions,
+  type OAuthSession,
 } from './db';
 import { validateCallbackParams, validateRedirectUrl } from './input-validation';
+import { RefreshTokenInvalidError } from './errors';
+import { validateEnv } from './env';
 
 // Validate environment variables on cold start
-// validateEnv();
+validateEnv();
 
 export interface ProviderConfig {
   /** URL-safe provider name used in DB + query params (e.g. "google-drive"). */
@@ -80,6 +84,9 @@ export async function handleStart(
       pkceVerifier: codeVerifier,
       redirectUrl: redirect,
     });
+
+    // Opportunistic cleanup of unreachable rows; never block the auth flow.
+    deleteStaleSessions().catch(() => undefined);
 
     const authUrl = await provider.getAuthUrl({ state, codeChallenge });
     res.redirect(302, authUrl);
@@ -155,7 +162,7 @@ export async function handleCallback(
 
     /* ---- Rotate session after successful auth ---- */
     const newSessionId = crypto.randomUUID();
-    await migrateSession(sessionId, newSessionId, provider.name);
+    await migrateSession(sessionId, newSessionId);
     setSessionCookie(res, newSessionId);
 
     /* ---- Encrypt refresh and access tokens ---- */
@@ -181,6 +188,29 @@ export async function handleCallback(
   }
 }
 
+/** Access token considered valid if it survives a 5-minute buffer. */
+function hasValidAccessToken(session: OAuthSession): boolean {
+  if (!session.access_token || !session.access_token_expires_at) return false;
+  return new Date(session.access_token_expires_at).getTime() - 5 * 60_000 > Date.now();
+}
+
+/**
+ * Refresh with one retry for transient failures (network hiccups, provider
+ * 5xx). A definitive rejection of the refresh token is never retried.
+ */
+async function refreshWithRetry(
+  provider: ProviderConfig,
+  refreshToken: string,
+): Promise<Awaited<ReturnType<ProviderConfig['refreshAccessToken']>>> {
+  try {
+    return await provider.refreshAccessToken(refreshToken);
+  } catch (err) {
+    if (err instanceof RefreshTokenInvalidError) throw err;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    return await provider.refreshAccessToken(refreshToken);
+  }
+}
+
 export async function handleAccessToken(
   req: VercelRequest,
   res: VercelResponse,
@@ -191,32 +221,76 @@ export async function handleAccessToken(
   try {
     const sessionId = getSessionId(req);
     if (!sessionId) {
-      res.status(401).json({ error: 'No session' });
+      res.status(401).json({ error: 'No session', code: 'reauthentication_required' });
       return;
     }
 
     const session = await getSession(sessionId, provider.name);
     if (!session?.encrypted_refresh_token) {
-      res.status(404).json({ error: `Not connected to ${provider.name}` });
+      res.status(404).json({
+        error: `Not connected to ${provider.name}`,
+        code: 'reauthentication_required',
+      });
       return;
     }
 
+    /* ---- sliding session renewal: every authenticated use of the
+     *      connection extends the cookie, so active users never hit the
+     *      fixed cookie expiry that previously forced reauthentication ---- */
+    setSessionCookie(res, sessionId);
+
     /* ---- return cached token if still valid (5 min buffer) ---- */
-    if (session.access_token && session.access_token_expires_at) {
-      const exp = new Date(session.access_token_expires_at).getTime();
-      if (exp - 5 * 60_000 > Date.now()) {
-        res.json({
-          access_token: decrypt(session.access_token),
-          expires_at: session.access_token_expires_at,
-          provider: provider.name,
-        });
-        return;
-      }
+    if (hasValidAccessToken(session)) {
+      res.json({
+        access_token: decrypt(session.access_token!),
+        expires_at: session.access_token_expires_at,
+        provider: provider.name,
+      });
+      return;
     }
 
     /* ---- refresh ---- */
     const refreshToken = decrypt(session.encrypted_refresh_token);
-    const result = await provider.refreshAccessToken(refreshToken);
+    let result: Awaited<ReturnType<ProviderConfig['refreshAccessToken']>>;
+    try {
+      result = await refreshWithRetry(provider, refreshToken);
+    } catch (err) {
+      if (err instanceof RefreshTokenInvalidError) {
+        // A concurrent request may have already refreshed (and, for providers
+        // that rotate refresh tokens, invalidated the one we just used).
+        // Re-read before concluding the grant is dead.
+        const latest = await getSession(sessionId, provider.name);
+        if (latest && hasValidAccessToken(latest)) {
+          res.json({
+            access_token: decrypt(latest.access_token!),
+            expires_at: latest.access_token_expires_at,
+            provider: provider.name,
+          });
+          return;
+        }
+
+        console.warn(`[${provider.name}/access-token] Refresh token invalid, clearing connection`, {
+          sessionId: sessionId.substring(0, 8) + '...',
+          timestamp: new Date().toISOString(),
+        });
+        await deleteSession(sessionId, provider.name);
+        res.status(401).json({
+          error: 'Cloud provider authorization expired. Please reconnect.',
+          code: 'reauthentication_required',
+        });
+        return;
+      }
+
+      console.error(`[${provider.name}/access-token] Transient refresh failure`, {
+        error: err instanceof Error ? err.message : 'Unknown error',
+        timestamp: new Date().toISOString(),
+      });
+      res.status(503).json({
+        error: 'Temporarily unable to refresh access token. Please try again.',
+        code: 'retry_later',
+      });
+      return;
+    }
 
     const update: Parameters<typeof updateAccessToken>[2] = {
       accessToken: encrypt(result.accessToken),

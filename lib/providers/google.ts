@@ -1,5 +1,6 @@
 import { OAuth2Client, CodeChallengeMethod } from 'google-auth-library';
 import type { ProviderConfig } from '../oauth-handler';
+import { RefreshTokenInvalidError, isInvalidGrantResponse } from '../errors';
 
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
@@ -56,7 +57,11 @@ export const googleProvider: ProviderConfig = {
     });
 
     if (!res.ok) {
-      throw new Error(`Google refresh failed: ${await res.text()}`);
+      const body = await res.text();
+      if (isInvalidGrantResponse(res.status, body)) {
+        throw new RefreshTokenInvalidError('google-drive');
+      }
+      throw new Error(`Google refresh failed (${res.status})`);
     }
 
     const data: any = await res.json();
