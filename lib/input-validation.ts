@@ -38,8 +38,18 @@ export function validateCallbackParams(query: any): CallbackParams | null {
 }
 
 /**
+ * Fixed custom-scheme redirect the native (iOS/Android) app registers to catch
+ * the OAuth callback in its in-app browser — see NATIVE_AUTH_CALLBACK_URL in
+ * lightningbowl's cloud-sync-api.service.ts. Unlike PWA origins, this never
+ * varies per environment, so it's allowed unconditionally rather than via
+ * ALLOWED_ORIGINS.
+ */
+const NATIVE_APP_REDIRECT_URL = 'lightningbowl://auth-callback';
+
+/**
  * Validate redirect URL.
- * Ensures only allowed origins are used.
+ * Ensures only allowed origins are used (PWA), plus the fixed native app
+ * callback scheme.
  */
 export function validateRedirectUrl(
   url: string | undefined,
@@ -52,6 +62,10 @@ export function validateRedirectUrl(
   // Length check
   if (url.length > 2048) {
     return null;
+  }
+
+  if (url === NATIVE_APP_REDIRECT_URL) {
+    return url;
   }
 
   try {
